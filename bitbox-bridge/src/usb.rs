@@ -155,7 +155,8 @@ impl UsbDevices {
             // TODO(nc): On windows interface_number is -1. How to distinguish hww?
             if device.vendor_id() == 0x03eb
                 && device.product_id() == 0x2403
-                && (device.interface_number() == 0 || device.interface_number() == -1)
+                && (device.product_string() == Some("BitBox02") || device.product_string() == Some("BitBox02BTC"))
+                && (device.interface_number() == 0 || device.usage_page() == 0xffff)
             {
                 let path = match device.path().as_ref().to_str() {
                     Ok(path) => path,
