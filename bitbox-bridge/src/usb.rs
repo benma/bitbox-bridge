@@ -12,15 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use futures::channel::mpsc;
-use futures::channel::oneshot;
-use futures::lock::Mutex;
 use futures::prelude::*;
 use hidapi_async::{Device, HidApi};
 use std::collections::{hash_map::Entry, HashMap};
 use std::sync::Arc;
 use std::time::Duration;
 use std::time::SystemTime;
+use tokio::sync::{mpsc, oneshot, Mutex};
 use u2fframing::{U2FFraming, U2fHid, U2fWs};
 
 struct DeviceEntry {
@@ -122,7 +120,7 @@ impl UsbDevices {
     ) -> Result<(), Box<dyn std::error::Error>> {
         loop {
             // Wait here until we are notified of new request
-            let _ = notify_rx.next().await;
+            let _ = notify_rx.recv().await;
             info!("Notified!");
             let mut last_seen = None;
             loop {
@@ -258,7 +256,7 @@ async fn device_loop(
 ) {
     loop {
         tokio::select! {
-            msg = in_rx.next() => {
+            msg = in_rx.recv() => {
                 if let Some(msg) = msg {
                     if let Err(e) = handle_msg(&mut device, msg, &mut out_tx).await {
                         error!("message ignored: {}", e);
@@ -268,7 +266,7 @@ async fn device_loop(
                     return;
                 }
             },
-            close_tx = on_close_rx.next() => {
+            close_tx = on_close_rx.recv() => {
                 if let Some(_close_tx) = close_tx {
                     // We drop the device explitly so that it is dropped before the Sender we were sent
                     drop(device);

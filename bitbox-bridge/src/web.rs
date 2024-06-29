@@ -1,4 +1,5 @@
 // Copyright 2020 Shift Cryptosecurity AG
+// Copyright 2024 Shift Crypto AG
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,12 +13,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use futures::channel::mpsc;
 use futures::prelude::*;
 use futures_util::sink::SinkExt;
 use percent_encoding::percent_decode_str;
 use std::collections::HashMap;
 use std::net::SocketAddr;
+use tokio::sync::mpsc;
 use warp::{self, Filter, Rejection};
 
 use crate::error::WebError;
@@ -80,8 +81,8 @@ fn add_origin(
 // ignore if channel already contained notification.
 pub fn notify(tx: &mut mpsc::Sender<()>) {
     match tx.try_send(()) {
-        Err(e) if e.is_disconnected() => debug!("Channel was closed"),
-        Err(e) if e.is_full() => (),
+        Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => debug!("Channel was closed"),
+        Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => (),
         _ => (),
     }
 }
@@ -100,7 +101,7 @@ async fn ws_upgrade(
     };
     let (usb_devices, mut tx) = usb_devices_tx;
     notify(&mut tx);
-    let (mut dev_tx, mut dev_rx) = usb_devices
+    let (dev_tx, mut dev_rx) = usb_devices
         .acquire_device(&path)
         .await
         .map_err(|_e| warp::reject::custom(WebError::NoSuchDevice))?
@@ -111,7 +112,7 @@ async fn ws_upgrade(
             async move {
                 let (mut ws_tx, mut ws_rx) = websocket.split();
                 tokio::spawn(async move {
-                    while let Some(data) = dev_rx.next().await {
+                    while let Some(data) = dev_rx.recv().await {
                         info!("WS TX: {:?}", data);
                         if let Err(e) = ws_tx.send(warp::ws::Message::binary(data)).await {
                             warn!("Failed, connection closed? {}", e);
@@ -130,9 +131,7 @@ async fn ws_upgrade(
                             info!("WS RX: {:?}", buf);
                             if buf.is_close() {
                                 // Connection closed, close internal channel
-                                if let Err(_e) = dev_tx.close().await {
-                                    error!("failed to close dev tx");
-                                }
+                                drop(dev_tx);
                                 return;
                             }
                             if buf.is_binary() {
